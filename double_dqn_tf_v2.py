@@ -19,7 +19,7 @@ class DDQNAgent:
         self.gamma = 0.85
         self.tau = 0.05
         self.epsilon = 1.0
-        self.epsilon_decay = 0.05
+        self.epsilon_decay = 0.995
 
         # Experience Replay
         self.memory_buffer_size = int(1e5)
@@ -71,24 +71,20 @@ class DDQNAgent:
 
         current_states = self.memory_buffer_current_state[batch_indices]
         rewards = self.memory_buffer_reward[batch_indices]
+        actions = self.memory_buffer_action[batch_indices].astype(int)
         done = self.memory_buffer_done[batch_indices]
+        next_states = self.memory_buffer_next_state[batch_indices]
 
         q_current_states = self.q_model.predict(current_states)
-        q_current_states_target = self.q_target_model.predict(current_states)
+        q_next_states_target = self.q_target_model.predict(next_states)
 
-        # q_targets = rewards + (1 - done) * (self.gamma * np.amax(q_current_states_target, axis=1))
-        # action_indices = np.argmax(q_current_states_target, axis=1)
-
-        q_targets = np.empty(len(q_current_states_target))
-        for i in range(len(q_current_states_target)):
+        for i in range(batch_size):
             if done[i]:
-                q_targets[i] = rewards[i] 
+                q_current_states[i, actions[i]] = rewards[i]
             else:
-                q_targets[i] = rewards[i] + self.gamma * np.max(q_current_states_target[i])
+                q_current_states[i, actions[i]] = rewards[i] + self.gamma * np.max(q_next_states_target[i])
 
-            q_current_states[i][np.argmax(q_current_states_target[i])] = q_targets[i]
-
-        self.q_model.fit(current_states, q_current_states, batch_size=batch_size, verbose=0, epochs=10)
+        self.q_model.fit(current_states, q_current_states, batch_size=batch_size, verbose=0, epochs=1)
 
     def update_q_target_network(self):
         model_weights = [w * self.tau for w in self.q_model.get_weights()]
@@ -113,7 +109,7 @@ def run_training_routine():
     action_size = env.action_space.n
     n_episodes = 500
     max_iterations_ep = 400
-    batch_size = 64
+    batch_size = 256
     q_network_update_freq = 4
     reward_history = []
 
