@@ -86,9 +86,6 @@ class DDQNAgent:
     def update_q_target_network(self):
         self.q_target_model.set_weights(self.q_model.get_weights())
 
-    def update_q_target_network(self):
-        self.q_target_model.set_weights(self.q_model.get_weights())
-
     def save_model_weights(self):
         self.q_model.save_weights('./models/double-dqn-model.weights.h5')
 
