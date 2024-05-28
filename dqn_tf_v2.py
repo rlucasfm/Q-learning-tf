@@ -15,7 +15,7 @@ class DQNAgent:
         self.lr = 0.001
         self.gamma = 0.99
         self.epsilon = 1
-        self.epsilon_decay = 0.8
+        self.epsilon_decay = 0.005
 
         self.batch_size = 32
         self.memory_buffer = list()

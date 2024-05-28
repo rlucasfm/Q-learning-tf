@@ -15,11 +15,11 @@ class DDQNAgent:
     def __init__(self, state_size, action_size):
         # Hyperparameters and misc
         self.n_actions = action_size
-        self.lr = 0.05
-        self.gamma = 0.99
-        self.tau = 0.001
+        self.lr = 0.005
+        self.gamma = 0.85
+        self.tau = 0.05
         self.epsilon = 1.0
-        self.epsilon_decay = 0.99
+        self.epsilon_decay = 0.05
 
         # Experience Replay
         self.memory_buffer_size = int(1e5)
@@ -76,17 +76,26 @@ class DDQNAgent:
         q_current_states = self.q_model.predict(current_states)
         q_current_states_target = self.q_target_model.predict(current_states)
 
-        q_targets = rewards + (1 - done) * (self.gamma * np.amax(q_current_states_target, axis=1))
-        action_indices = np.argmax(q_current_states_target, axis=1)
+        # q_targets = rewards + (1 - done) * (self.gamma * np.amax(q_current_states_target, axis=1))
+        # action_indices = np.argmax(q_current_states_target, axis=1)
 
-        for i in range(len(action_indices)):
-            q_current_states[i][action_indices[i]] = q_targets[i]
+        q_targets = np.empty(len(q_current_states_target))
+        for i in range(len(q_current_states_target)):
+            if done[i]:
+                q_targets[i] = rewards[i] 
+            else:
+                q_targets[i] = rewards[i] + self.gamma * np.max(q_current_states_target[i])
 
-        self.q_model.fit(current_states, q_current_states, batch_size=batch_size, verbose=0, epochs=100)
+            q_current_states[i][np.argmax(q_current_states_target[i])] = q_targets[i]
+
+        self.q_model.fit(current_states, q_current_states, batch_size=batch_size, verbose=0, epochs=10)
 
     def update_q_target_network(self):
-        new_weights = (int(self.tau) * self.q_model.get_weights()) + ((1 - int(self.tau)) * self.q_target_model.get_weights())
-        self.q_target_model.set_weights(new_weights)
+        model_weights = [w * self.tau for w in self.q_model.get_weights()]
+        target_weights = [w * (1 - self.tau) for w in self.q_target_model.get_weights()]
+        
+        combined_weights = [mw + tw for mw, tw in zip(model_weights, target_weights)]
+        self.q_target_model.set_weights(combined_weights)
 
     def save_model_weights(self):
         self.q_model.save_weights('./models/double-dqn-model.weights.h5')
@@ -104,7 +113,7 @@ def run_training_routine():
     action_size = env.action_space.n
     n_episodes = 500
     max_iterations_ep = 400
-    batch_size = 200
+    batch_size = 64
     q_network_update_freq = 4
     reward_history = []
 
