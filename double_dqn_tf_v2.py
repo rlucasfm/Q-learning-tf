@@ -13,21 +13,31 @@ from timeit import default_timer as timer
 
 class DDQNAgent:
     def __init__(self, state_size, action_size):
+        # Hyperparameters and misc
         self.n_actions = action_size
-        self.lr = 0.005
-        self.gamma = 0.95
+        self.lr = 0.05
+        self.gamma = 0.99
         self.epsilon = 1.0
         self.epsilon_decay = 0.005
-        self.memory_buffer = list()
-        self.memory_buffer_size = 2000
+
+        # Experience Replay
+        self.memory_buffer_size = int(1e5)
+        self.memory_buffer_pointer = 0
+        self.memory_buffer_current_state = np.empty(shape=(self.memory_buffer_size, state_size))
+        self.memory_buffer_next_state = np.empty(shape=(self.memory_buffer_size, state_size))
+        self.memory_buffer_action = np.empty(shape=(self.memory_buffer_size,))
+        self.memory_buffer_reward = np.empty(shape=(self.memory_buffer_size,))
+        self.memory_buffer_done = np.empty(shape=(self.memory_buffer_size,))
+
+        # Neural Networks 
         self.q_model = self.build_model(state_size, action_size)
         self.q_target_model = self.build_model(state_size, action_size)
 
     def build_model(self, state_size, action_size):
         model = Sequential([
             Input(shape=(state_size,)),
-            Dense(units=48, activation='relu'),
-            Dense(units=48, activation='relu'),
+            Dense(units=64, activation='relu'),
+            Dense(units=64, activation='relu'),
             Dense(units=action_size, activation='linear')
         ])
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
@@ -41,54 +51,40 @@ class DDQNAgent:
             return np.argmax(q_values)
         
     def store_episode(self, current_state, action, reward, next_state, done):
-        self.memory_buffer.append({
-            "current_state": current_state,
-            "action": action,
-            "reward": reward,
-            "next_state": next_state,
-            "done": done
-        })
+        self.memory_buffer_current_state[self.memory_buffer_pointer] = current_state
+        self.memory_buffer_next_state[self.memory_buffer_pointer] = next_state
+        self.memory_buffer_action[self.memory_buffer_pointer] = action
+        self.memory_buffer_reward[self.memory_buffer_pointer] = reward
+        self.memory_buffer_done[self.memory_buffer_pointer] = done
+        
+        self.memory_buffer_pointer += 1
 
-        if len(self.memory_buffer) >= self.memory_buffer_size:
-            self.memory_buffer.pop(0)
+        if self.memory_buffer_pointer >= self.memory_buffer_size:
+            self.memory_buffer_pointer = 0
 
     def update_epsilon(self):
         self.epsilon = self.epsilon_decay * self.epsilon
 
     def train(self, batch_size):
-        np.random.shuffle(self.memory_buffer)
-        batch_sample = self.memory_buffer[0:batch_size]
+        batch_indices = np.random.choice(self.memory_buffer_current_state.shape[0], batch_size)
 
-        for experience in batch_sample:
-            q_current_state = self.q_model.predict(experience["current_state"])[0]
+        current_states = self.memory_buffer_current_state[batch_indices]
+        rewards = self.memory_buffer_reward[batch_indices]
+        done = self.memory_buffer_done[batch_indices]
 
-            if experience["done"]:
-                q_target = experience["reward"]
-            else:
-                q_target = experience["reward"] + (self.gamma * np.max(self.q_target_model.predict(experience["next_state"])[0]))
+        q_current_states = self.q_model.predict(current_states)
+        q_current_states_target = self.q_target_model.predict(current_states)
 
-            q_current_state[experience["action"]] = q_target
-            self.q_model.fit(experience["current_state"], np.array([q_current_state]), verbose=0)
+        q_targets = rewards + (1 - done) * (self.gamma * np.amax(q_current_states_target, axis=1))
+        action_indices = np.argmax(q_current_states_target, axis=1)
 
-    def train_v2(self, batch_size):
-        np.random.shuffle(self.memory_buffer)
-        batch_sample = self.memory_buffer[0:batch_size]
-        current_state_arr = []
-        q_current_state_arr = []
+        for i in range(len(action_indices)):
+            q_current_states[i][action_indices[i]] = q_targets[i]
 
-        for experience in batch_sample:
-            q_current_state = self.q_model.predict(experience["current_state"])[0]
+        self.q_model.fit(current_states, q_current_states)
 
-            if experience["done"]:
-                q_target = experience["reward"]
-            else:
-                q_target = experience["reward"] + (self.gamma * np.max(self.q_target_model.predict(experience["next_state"])[0]))
-
-            q_current_state[experience["action"]] = q_target
-            current_state_arr.append(experience["current_state"])
-            q_current_state_arr.append(np.array([q_current_state]))
-
-        self.q_model.fit(current_state_arr, q_current_state_arr, shuffle=True, epochs=1, verbose='auto')
+    def update_q_target_network(self):
+        self.q_target_model.set_weights(self.q_model.get_weights())
 
     def update_q_target_network(self):
         self.q_target_model.set_weights(self.q_model.get_weights())
@@ -107,9 +103,9 @@ def run_training_routine():
     successfull_episodes_threshold = 20
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
-    n_episodes = 400
-    max_iterations_ep = 200
-    batch_size = 128
+    n_episodes = 200
+    max_iterations_ep = 400
+    batch_size = int(1e2)
     q_target_update_freq = 10
 
     agent = DDQNAgent(state_size, action_size)
@@ -152,6 +148,7 @@ def run_training_routine():
             if n_training % q_target_update_freq:
                 agent.update_q_target_network()
 
+        print(f"Successfull episodes: {successfull_episodes}")
         if successfull_episodes >= successfull_episodes_threshold:
             end_time = timer()
             print("Successfull episodes threshold reached.")
