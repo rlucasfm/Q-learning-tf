@@ -17,8 +17,9 @@ class DDQNAgent:
         self.n_actions = action_size
         self.lr = 0.05
         self.gamma = 0.99
+        self.tau = 0.001
         self.epsilon = 1.0
-        self.epsilon_decay = 0.005
+        self.epsilon_decay = 0.99
 
         # Experience Replay
         self.memory_buffer_size = int(1e5)
@@ -81,10 +82,11 @@ class DDQNAgent:
         for i in range(len(action_indices)):
             q_current_states[i][action_indices[i]] = q_targets[i]
 
-        self.q_model.fit(current_states, q_current_states)
+        self.q_model.fit(current_states, q_current_states, batch_size=batch_size, verbose=0, epochs=100)
 
     def update_q_target_network(self):
-        self.q_target_model.set_weights(self.q_model.get_weights())
+        new_weights = (int(self.tau) * self.q_model.get_weights()) + ((1 - int(self.tau)) * self.q_target_model.get_weights())
+        self.q_target_model.set_weights(new_weights)
 
     def save_model_weights(self):
         self.q_model.save_weights('./models/double-dqn-model.weights.h5')
@@ -100,14 +102,14 @@ def run_training_routine():
     successfull_episodes_threshold = 20
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
-    n_episodes = 200
+    n_episodes = 500
     max_iterations_ep = 400
-    batch_size = int(1e2)
-    q_target_update_freq = 10
+    batch_size = 200
+    q_network_update_freq = 4
+    reward_history = []
 
     agent = DDQNAgent(state_size, action_size)
     total_steps = 0
-    n_training = 0
     successfull_episodes = 0
 
     for episode in range(n_episodes):
@@ -138,26 +140,28 @@ def run_training_routine():
             current_state = next_state
         
         print(" rewards: ", rewards)
+        reward_history.append(rewards)
 
         if total_steps >= batch_size:
-            agent.train(batch_size=batch_size)
-            n_training = n_training + 1
-            if n_training % q_target_update_freq:
-                agent.update_q_target_network()
+            if total_steps % q_network_update_freq == 0:
+                agent.train(batch_size=batch_size)
+                agent.update_q_target_network()                
 
         print(f"Successfull episodes: {successfull_episodes}")
-        if successfull_episodes >= successfull_episodes_threshold:
-            end_time = timer()
-            print("Successfull episodes threshold reached.")
-            print(f"Total Elapsed time: {end_time - start_time}")
-            return agent.save_model_weights()
 
         episode_end = timer()
         print(f"Episode elapsed time: {episode_end - episode_start}")
 
+        if successfull_episodes >= successfull_episodes_threshold:
+            print("Successfull episodes threshold reached.")
+            print(f"Total Elapsed time: {episode_end - start_time}")
+            agent.save_model_weights()
+            return reward_history
+
     end_time = timer()
     print(f"Total Elapsed time: {end_time - start_time}")
     agent.save_model_weights()
+    return reward_history
 
 def run_sim_routine():
     env = gym.make('CartPole-v1', render_mode="human")
@@ -178,7 +182,12 @@ def run_sim_routine():
     env.close()
 
 if __name__ == "__main__":
-    run_training_routine()
+    reward_history = run_training_routine()
+    fig, ax = plt.subplots()
+    ax.plot(reward_history)
+    ax.set(xlabel="Iteração", ylabel="Recompensa do episódio")
+    ax.grid()
+    plt.show()
 
     # for i in range(5):
     #     run_sim_routine()
